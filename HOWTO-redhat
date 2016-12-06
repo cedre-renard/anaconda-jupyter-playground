@@ -1,0 +1,232 @@
+
+#
+# notes started 28-Nov-2016
+#
+
+# Please note that the initial image of RedHat came from a corporate IT department
+# and was not intended for a development server. You'll see, below, that we had
+# to add fundamental packages such as gcc (!).
+
+# I used RedHat 6, not RedHat 7. And it was RedHat Enterprise Linux (rhel), not Centos.
+# I've also tried similar steps on Centos 7 and the process steps are the same but a few commands differ.
+
+# It is essential to have root authority on the server.
+# It is helpful if you also have authority to destroy and rebuild the (virtual) server
+# so that you can modify the space allocation to various file systems.
+
+# The following info is in no particular sequence. Random. Whatever was I thinking?
+
+#-----------------------------
+# setup a poc environment on a filesystem with lots of space
+# that is NOT one of the ordinary linux filesystems
+
+# login as root
+# create a user "myuser" (it helps a lot to have a non-root user)
+# You will see ~ in the instructions below to refer to this regular user's home directory
+# I used /home/myuser but feel free to adopt other conventions
+# I also used a common convention where myuser is also the group for the myuser user
+
+# setup the poc ecosystem somewhere useful
+su root
+cd /largeuserfilesystem
+umask 002
+mkdir poc
+cd poc
+mkdir myuser
+chgrp myuser myuser
+chown myuser myuser
+exit (from root)
+cd ~
+ln -s /largeuserfilesystem/poc/myuser ./poc
+# this creates ~/poc as a space on the large user-owned filesystem where we can safely work our magic
+# as you may guess, I used a convention that permits us to setup other users with their own space
+# on that same (shared) user-owned filesystem, without overlapping.
+
+#-----------------------------
+# The next steps alternate between various database drivers and the necessary components
+# in RedHat to make them work. Please see other HOWTO's that focus more simply on the database drivers
+#-----------------------------
+# installation of Netezza database drivers
+cd ~/poc/mod
+umask 002
+mkdir nz
+cd nz
+su root
+# I am pretty sure that I used a corporate account to IBM to get the latest Netezza downloads
+wget (from where??) nz-linuxclient-v7.0.2.12-P1.tar
+tar xvf ... that thing ...
+lib/unpack
+lib64/unpack
+exit (from root)
+
+# add to the path
+# (as myuser, not root)
+vi ~/.bashrc
+# add this:
+export PATH="$PATH:/usr/local/nz/bin"
+. ~/.bashrc
+
+#-----------------------------
+# ... and fill in a bunch of missing stuff ...
+# setup of RedHat
+su root
+yum install glibc.i686
+yum install zlib
+yum install zlib.i686
+yum install openssl098e- (whatever is latest repo version)
+yum install ncurses-libs-57- (whatever is latest repo version)
+exit (from root)
+
+#-----------------------------
+# open the Jupyter notebook port for httpd
+# You will notice that this is RedHat 6 because it uses service, not systemctl as in RedHat 7
+su root
+service httpd stop
+chkconfig httpd on
+vi /etc/httpd/conf/httpd.conf
+# and add 8888 to Listen ports
+service httpd start 
+exit (leave root)
+
+# setup notebook friendly world
+cd ~/poc
+umask 002
+mkdir notebooks
+jupyter notebook --ip=tparhelvmd004.foobar.com --notebook-dir=/home/myuser/poc/notebooks --no-browser &
+
+#-----------------------------
+# We found insufficient disk space on /usr so I had to extend the filesystem
+# fortunately, the virtual server had provided more disk space than was fully allocated
+# to filesystems, so we could extend. If this were not the case, we would have had to
+# destroy this virtual server and start over again with better choices for the size of filesystems.
+
+# extending the logical volume and filesystem for /usr
+df -k /usr
+df -k /dev/mapper/sysvg-usr.vol
+vgdisplay sysvg
+lvdisplay sysvg
+lvdisplay /dev/sysvg/usr.vol
+lvextend -l+3072 /dev/sysvg/usr.vol
+lvdisplay /dev/sysvg/usr.vol
+resize2fs /dev/mapper/sysvg-usr.vol 16G
+df -k /dev/mapper/sysvg-usr.vol
+
+#-----------------------------
+# install couchbase SDK
+cd ~/poc/mod
+umask 002
+mkdir cb
+cd cb
+wget http://packages.couchbase.com/releases/couchbase-release/couchbase-release-1.0-2-x86_64.rpm
+su root
+rpm -iv couchbase-release-1.0-2-x86_64.rpm
+exit (get out of root)
+
+#-----------------------------
+# install python couchbase package (reshape to conda)
+yum provides gcc
+yum install gcc-4.4.7-17.el6.x86_64
+yum install libcouchbase-devel
+
+# this is a useful approach to build a conda package from pypi... simple enough
+conda skeleton pypi couchbase
+conda build couchbase
+conda install --use-local couchbase
+# Never used these ... old notes from CentOS ... not sure why they were not needed.
+# but you might need them. Just in case, I preserved them here
+#   yum install gcc-c++ python-devel python-pip
+
+#-----------------------------
+# install Oracle database drivers
+#    I used an Oracle user-id/password attached to corporate identity
+#    and on their downloads site, downloaded these to my PC
+#    then used FileZilla to move them onto this Linux server
+cd ~/poc/mod/ora
+su root
+rpm -Uvh oracle-instantclient12.1-basic-12.1.0.2.0-1.x86_64.rpm
+rpm -Uvh oracle-instantclient12.1-devel-12.1.0.2.0-1.x86_64.rpm
+rpm -Uvh oracle-instantclient12.1-odbc-12.1.0.2.0-1.x86_64.rpm
+rpm -Uvh oracle-instantclient12.1-sqlplus-12.1.0.2.0-1.x86_64.rpm
+exit (from root)
+
+# add Oracle environment variables
+# (as myuser, not as root)
+vi ~/.bashrc
+# add the following:
+export PATH="$PATH:/usr/lib/oracle/12.1/client64/bin"
+export LD_LIBRARY_PATH=/usr/lib/oracle/12.1/client64/lib
+. ~/.bashrc
+
+# install unixodbc (default location: /usr/local and subdirectories beneath that)
+cd ~/poc/mod
+umask 002
+mkdir unixodbc
+cd unixodbc
+wget http://www.unixodbc.org/unixODBC-2.3.4.tar.gz
+gunzip unixODBC-2.3.4.tar.gz
+tar xvf unixODBC-2.3.4.tar.gz
+cd unixODBC-2.3.4.tar.gz
+./configure
+make
+su root
+make install
+exit (from root)
+# add to the path
+#   (as myuser, not root)
+vi ~/.bashrc
+# add this:
+export ODBCSYSINI=/usr/local/etc
+
+# configure oracle as an odbc DSN
+su root
+# first, the oracle driver (from odbc point of view)
+vi /usr/local/etc/odbcinst.ini
+# contents as follows:
+[OracleODBC-12g]
+Description = Oracle ODBC driver for Oracle 12g
+Driver = /usr/lib/oracle/12.1/client64/lib/libsqora.so.12.1
+FileUsage = 1
+Driver Logging = 7
+# second, an odbc DSN for a specific Oracle database (not essential)
+vi /usr/local/etc/odbc.ini
+# contents as follows: (an example) -- PLEASE NOTE the absence of userid & password ... that's just safer this way
+[PNLR1MSMCMID]
+Driver = OracleODBC-12g
+DSN = PNLR1MSMCMID
+ServerName = //tparheorad001.foobar.com:1521/CMI280D
+# but obviously, if you're using an odbc DSN to point to an Oracle DSN, you'll need an Oracle DSN
+# so let's create one
+su root
+mkdir /etc/oracle
+vi /etc/oracle/tnsnames.ora
+# contents as follows
+PNLR1MSMCMID =
+ ( DESCRIPTION =
+  (ADDRESS_LIST =
+  (ADDRESS =
+  (PROTOCOL = TCP)
+  (Host = tparheorad001.foobar.com)
+  (Port = 1521)
+  )
+ )
+ (CONNECT_DATA =
+  (SERVICE_NAME = CMI280D)
+  (SERVER = DEDICATED)
+ )
+)
+# exit from root
+exit (from root)
+
+# and tell the odbc world where to find the oracle world
+# add to the path
+#   (as myuser, not root)
+vi ~/.bashrc
+# add this:
+export TNS_ADMIN=/etc/oracle
+
+# install pyodbc
+#   (as myuser, not root)
+conda install pyodbc
+
+#-----------------------------
+# end of HOWTO-redhat
